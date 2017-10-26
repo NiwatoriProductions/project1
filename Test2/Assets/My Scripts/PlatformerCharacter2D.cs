@@ -5,14 +5,14 @@ namespace MyScripts
 {
     public class PlatformerCharacter2D : MonoBehaviour
     {
-        [SerializeField] private float m_MaxSpeed = 10f;                    // The fastest the player can travel in the x axis.
-        [SerializeField] private float m_JumpForce = 400f;                  // Amount of force added when the player jumps.
-        [Range(0, 1)] [SerializeField] private float m_CrouchSpeed = .36f;  // Amount of maxSpeed applied to crouching movement. 1 = 100%
-        [SerializeField] private bool m_AirControl = false;                 // Whether or not a player can steer while jumping;
-        [SerializeField] private LayerMask m_WhatIsGround;                  // A mask determining what is ground to the character
-        [Range(0,1)] [SerializeField] private int m_Layer; //0=Physical, 1=Spiritual
-        private LayerMask colidables;
+        [SerializeField] private float m_MaxSpeed = 10f;                                    // The fastest the player can travel in the x axis.
+        [SerializeField] private float m_JumpForce = 1000f;                                 // Amount of force added when the player jumps.
+        [Range(0, 1)] [SerializeField] private float m_CrouchSpeed = .36f;                  // Amount of maxSpeed applied to crouching movement. 1 = 100%
+        [SerializeField] private bool m_AirControl = true;                                  // Whether or not a player can steer while jumping;
+        [Range(0, 1)] [SerializeField] private float m_AirControlSpeed = .06f;              // Amount of maxSpeed applied to in air movement. 1 = 100%
+        [SerializeField] private LayerMask m_WhatIsGround;   // A mask determining what is ground to the character
 
+        private int m_Layer; //0=Physical, 1=Spiritual
         private Transform m_GroundCheck;    // A position marking where to check if the player is grounded.
         const float k_GroundedRadius = .2f; // Radius of the overlap circle to determine if grounded
         private bool m_Grounded;            // Whether or not the player is grounded.
@@ -33,6 +33,42 @@ namespace MyScripts
         private float m_FlightAvail;
         private float m_FlightEnd;
         private bool flight_on = false;
+        private Vector2 m_FlightVelocity;
+
+        
+        [SerializeField] private float m_GraplingHookCD = 2f;
+        [SerializeField] private float m_GraplingHookRange = 20f;
+        [SerializeField] private float m_GraplingHookForce = 40f;
+        [SerializeField] private float m_GraplinHookCancelRange = 2f;
+        private LayerMask m_GraplingHookTargetable;
+        private Vector2 m_GraplitngHookHitPoint;
+        private float m_GraplingHookAvail;
+        private bool m_GraplingHookOn = false;
+
+        [SerializeField] private float m_DashCD = 2f;
+        [SerializeField] private float m_DashForceMin = 10f;
+        [SerializeField] private float m_DashForceMax = 60f;
+        [SerializeField] private float m_DashChargeDelay = .1f;
+        [SerializeField] private float m_DashChargeTimeLimit = 2f;
+        private Vector2 m_DashDirection;
+        private float m_DashAvail;
+        private float m_DashStart;
+        private bool m_DashButtonHold;
+        private bool m_DashOn = false;
+
+        [SerializeField] private float m_TeleportCD = 2f;
+        [SerializeField] private float m_TeleportRange = 5f;
+        //[SerializeField] private float m_TeleportChargeDelay = .1f;
+        private float m_TeleportAvail;
+        private bool m_TeleportOn = false;
+
+        [SerializeField] private float m_BounceCD = 2f;
+        [SerializeField] private float m_BounceDur = 4f;
+        private float m_BounceAvail;
+        private float m_BounceEnd;
+        private bool m_BounceOn = false;
+
+
 
         private void Awake()
         {
@@ -41,11 +77,24 @@ namespace MyScripts
             m_CeilingCheck = transform.Find("CeilingCheck");
             m_Anim = GetComponent<Animator>();
             m_Rigidbody2D = GetComponent<Rigidbody2D>();
+            m_WhatIsGround = LayerMask.GetMask("Default");
+            
+
             physical_layer = LayerMask.NameToLayer("Physical");
             spiritual_layer = LayerMask.NameToLayer("Spiritual");
             player_layer = LayerMask.NameToLayer("Player");
+
             m_FlightAvail = Time.time;
             m_FlightEnd = Time.time;
+
+            m_GraplingHookAvail = Time.time;
+            m_GraplingHookTargetable = LayerMask.GetMask("Default", "Physical");
+
+            m_DashAvail = Time.time;
+
+            m_BounceAvail = Time.time;
+            m_BounceEnd = Time.time;
+
             Physics2D.IgnoreLayerCollision(player_layer, physical_layer, m_Layer != 0);
             Physics2D.IgnoreLayerCollision(player_layer, spiritual_layer, m_Layer != 1);
         }
@@ -54,20 +103,68 @@ namespace MyScripts
         private void FixedUpdate()
         {
             m_Grounded = false;
-            colidables = m_WhatIsGround | (1 << (LayerMask.NameToLayer(m_Layer==0 ? "Physical" : "Spiritual")));
+            //colidables = m_WhatIsGround | (1 << (LayerMask.NameToLayer(m_Layer==0 ? "Physical" : "Spiritual")));
+            m_WhatIsGround = LayerMask.GetMask("Default", m_Layer==0 ? "Physical" : "Spiritual");
 
             // The player is grounded if a circlecast to the groundcheck position hits anything designated as ground
             // This can be done using layers instead but Sample Assets will not overwrite your project settings.
 
-            if (flight_on & Time.time > m_FlightEnd)
+            if (flight_on)
             {
-                m_Rigidbody2D.gravityScale = 3; //TODO: remove hard-coded 3?
-                m_AirControl = true;
-                m_FlightAvail = Time.time + m_FlightCD;
-                flight_on = false;
+                if (Time.time > m_FlightEnd)
+                {
+                    //flight time out
+                    m_FlightAvail = Time.time + m_FlightCD;
+                    flight_on = false;
+                }
+                else
+                {
+                    //keep flight initial velocity
+                    m_Rigidbody2D.velocity = new Vector2(m_Rigidbody2D.velocity.normalized.x * Mathf.Abs(m_FlightVelocity.x), m_Rigidbody2D.velocity.normalized.y * Mathf.Abs(m_FlightVelocity.y));
+                }
+            }
+            if (m_DashOn)
+            {
+                if (!m_DashButtonHold || (Time.time - m_DashStart) >= m_DashChargeTimeLimit)
+                {
+                    float m_ChargeTime = Mathf.Min(Time.time - m_DashStart, m_DashChargeTimeLimit);
+                    float m_power = m_DashForceMin + m_ChargeTime / m_DashChargeTimeLimit * (m_DashForceMax - m_DashForceMin);
+                    Debug.Log(m_power);
+                    //m_Rigidbody2D.MovePosition(new Vector2(m_Rigidbody2D.position.x, m_Rigidbody2D.position.y + .1f));
+                    m_Rigidbody2D.AddForce(m_DashDirection * m_power, ForceMode2D.Impulse);
+                    m_DashOn = false;
+                    m_DashAvail = Time.time + m_DashCD;
+                    Debug.DrawRay(m_Rigidbody2D.position, m_DashDirection, Color.cyan, 2);
+                }
+                else
+                {
+                    //prehibit movement
+                    //m_Rigidbody2D.velocity = new Vector2(0, 0);
+                }
+            }
+            if (m_GraplingHookOn)
+            {
+                if (Mathf.Abs((m_Rigidbody2D.position - m_GraplitngHookHitPoint).magnitude) <= m_GraplinHookCancelRange)
+                {
+                    m_GraplingHookOn = false;
+                    m_GraplingHookAvail = m_GraplingHookCD + Time.time;
+                }
+                else
+                {
+                    Vector2 m_HitDirection = (m_GraplitngHookHitPoint - m_Rigidbody2D.position).normalized;
+                    m_Rigidbody2D.velocity = m_HitDirection * m_GraplingHookForce;
+                    Debug.DrawLine(m_GraplitngHookHitPoint, m_Rigidbody2D.position, Color.red);
+                }
+            }
+            if (m_BounceOn && Time.time > m_BounceEnd)
+            {
+                //Bounce time out
+                m_BounceAvail = Time.time + m_BounceCD;
+                m_BounceOn = false;
+                m_Rigidbody2D.sharedMaterial.bounciness = 0;
             }
 
-            Collider2D[] colliders = Physics2D.OverlapCircleAll(m_GroundCheck.position, k_GroundedRadius, colidables);
+            Collider2D[] colliders = Physics2D.OverlapCircleAll(m_GroundCheck.position, k_GroundedRadius, m_WhatIsGround);
             for (int i = 0; i < colliders.Length; i++)
             {
                 if (colliders[i].gameObject != gameObject)
@@ -80,13 +177,13 @@ namespace MyScripts
         }
 
 
-        public void Move(float move, bool crouch, bool jump, bool swap, bool active1)
+        public void Move(float move, bool crouch, bool jump, bool swap, bool active1, bool active2, bool mouse1, bool mouse1Up, bool mouse2, bool mouse2Up)
         {
             // If crouching, check to see if the character can stand up
             if (!crouch && m_Anim.GetBool("Crouch"))
             {
                 // If the character has a ceiling preventing them from standing up, keep them crouching
-                if (Physics2D.OverlapCircle(m_CeilingCheck.position, k_CeilingRadius, colidables))
+                if (Physics2D.OverlapCircle(m_CeilingCheck.position, k_CeilingRadius, m_WhatIsGround))
                 {
                     crouch = true;
                 }
@@ -104,13 +201,38 @@ namespace MyScripts
             if (m_Grounded || m_AirControl)
             {
                 // Reduce the speed if crouching by the crouchSpeed multiplier
-                move = (crouch ? move*m_CrouchSpeed : move);
+                move = (crouch ? move * m_CrouchSpeed : m_Grounded ? move : move * m_AirControlSpeed);
 
+                float m_NetHorizontalMove = 0f;
+                if (m_Grounded)
+                {
+                    m_NetHorizontalMove = move * m_MaxSpeed;
+                }
+                else
+                {
+                    // If in air keep horizontal momentum and limited control
+                    if (m_Rigidbody2D.velocity.x >= m_MaxSpeed)
+                    {
+                        //if speed past limit only alow movement to slow it, not speed it up
+                        m_NetHorizontalMove = (m_Rigidbody2D.velocity.x) + (move > 0 ? 0 : move * m_MaxSpeed);
+                    }
+                    else if (m_Rigidbody2D.velocity.x <= -m_MaxSpeed)
+                    {
+                        //if speed past limit only alow movement to slow it, not speed it up
+                        m_NetHorizontalMove = (m_Rigidbody2D.velocity.x) + (move < 0 ? 0 : move * m_MaxSpeed);
+                    }
+                    else
+                    {
+                        //ensure speed stays within max range if it enters the max range
+                        m_NetHorizontalMove = (m_Rigidbody2D.velocity.x) + (move * m_MaxSpeed);
+                        m_NetHorizontalMove = m_NetHorizontalMove > m_MaxSpeed ? m_MaxSpeed : m_NetHorizontalMove < -m_MaxSpeed ? -m_MaxSpeed : m_NetHorizontalMove;
+                    }
+                }
                 // The Speed animator parameter is set to the absolute value of the horizontal input.
-                m_Anim.SetFloat("Speed", Mathf.Abs(move));
+                m_Anim.SetFloat("Speed", Mathf.Abs(m_NetHorizontalMove));
 
                 // Move the character
-                m_Rigidbody2D.velocity = new Vector2(move*m_MaxSpeed, m_Rigidbody2D.velocity.y);
+                m_Rigidbody2D.velocity = new Vector2(m_NetHorizontalMove, m_Rigidbody2D.velocity.y);
 
                 // If the input is moving the player right and the player is facing left...
                 if (move > 0 && !m_FacingRight)
@@ -118,7 +240,7 @@ namespace MyScripts
                     // ... flip the player.
                     Flip();
                 }
-                    // Otherwise if the input is moving the player left and the player is facing right...
+                // Otherwise if the input is moving the player left and the player is facing right...
                 else if (move < 0 && m_FacingRight)
                 {
                     // ... flip the player.
@@ -133,11 +255,12 @@ namespace MyScripts
                 m_Anim.SetBool("Ground", false);
                 m_Rigidbody2D.AddForce(new Vector2(0f, m_JumpForce));
             }
-            else if (m_AirJumpAvail && m_Layer == 1 && jump) 
+            else if (m_AirJumpAvail && m_Layer == 1 && jump) //else if double jump
             {
                 m_Rigidbody2D.velocity = new Vector2(m_Rigidbody2D.velocity.x, m_JumpSpeed);
                 m_AirJumpAvail = false;
             }
+            //if layer swap
             if (swap)
             {
                 m_Layer = m_Layer * -1 + 1;
@@ -151,7 +274,7 @@ namespace MyScripts
                     flight_on = false;
                 }
             }
-            if (active1)
+            if (active1)//if e pressed
             {
                 if (m_Layer == 0)
                 {
@@ -162,8 +285,6 @@ namespace MyScripts
                     //retain momentum
                     if (flight_on)
                     {
-                        m_Rigidbody2D.gravityScale = 3; //TODO: remove hard-coded 3?
-                        m_AirControl = true;
                         m_FlightAvail = Time.time + m_FlightCD;
                         flight_on = false;
                     }
@@ -171,16 +292,117 @@ namespace MyScripts
                     {
                         if (Time.time > m_FlightAvail)
                         {
-                            m_Rigidbody2D.gravityScale = 0;
-                            m_AirControl = false;
+                            m_FlightVelocity = m_Rigidbody2D.velocity;
                             flight_on = true;
                             m_FlightEnd = Time.time + m_FlightDur;
                         }
-                        
+
                     }
                     //start timer
 
-                    
+
+                }
+            }
+            if (active2)//if q pressed
+            {
+                if (m_Layer == 0)
+                {
+                }
+                else if (m_Layer == 1)//Bounce
+                {
+                    if (m_BounceOn)
+                    {
+                        m_Rigidbody2D.sharedMaterial.bounciness = 0;
+                        m_BounceAvail = Time.time + m_BounceCD;
+                        m_BounceOn = false;
+                    }
+                    else
+                    {
+                        if (Time.time > m_BounceAvail)
+                        {
+                            m_Rigidbody2D.sharedMaterial.bounciness = 1;
+                            m_BounceOn = true;
+                            m_BounceEnd = Time.time + m_BounceDur;
+                        }
+                    }
+                }
+            }
+            if (mouse1)//if m1 pressed
+            {
+                if (m_Layer == 0)//GRAPLING
+                {
+                    if (m_GraplingHookOn)
+                    {
+                        //turn off
+                        m_GraplingHookOn = false;
+                        m_GraplingHookAvail = m_GraplingHookCD + Time.time;
+                    }
+                    else if (Time.time > m_GraplingHookAvail)
+                    {
+                        Vector2 m_MousePosition = new Vector2(Camera.main.ScreenToWorldPoint(Input.mousePosition).x, Camera.main.ScreenToWorldPoint(Input.mousePosition).y);
+                        Vector2 m_PlayerPosition = m_Rigidbody2D.position;
+                        Vector2 m_Direction = (m_MousePosition - m_PlayerPosition).normalized;
+                        RaycastHit2D hit = Physics2D.Raycast(m_PlayerPosition, m_Direction, m_GraplingHookRange, m_GraplingHookTargetable);
+                        if (hit.collider != null)
+                        {
+                            m_GraplitngHookHitPoint = hit.point;
+                            m_GraplingHookOn = true;
+                            //Transform objectHit = hit.transform;//if i need to know what i hit
+
+                            //below doesn't feel like a grapling hook, more like a thrust
+                            //m_Rigidbody2D.AddForce(m_Direction * m_GraplingHookForce, ForceMode2D.Impulse);
+                            //idea: hold mouse and the hook wont retract?
+                        }
+                    }
+                }
+                else if (m_Layer == 1)//DASH
+                {
+                    if (m_DashOn)
+                    {
+                        //Unable to cancel a dash!
+                        Debug.Log("Can't Cancel");
+                    }
+                    else if (Time.time > m_DashAvail)
+                    {
+                        Vector2 m_MousePosition = new Vector2(Camera.main.ScreenToWorldPoint(Input.mousePosition).x, Camera.main.ScreenToWorldPoint(Input.mousePosition).y);
+                        Vector2 m_PlayerPosition = m_Rigidbody2D.position;
+                        m_DashDirection = (m_MousePosition - m_PlayerPosition).normalized;
+                        m_DashStart = Time.time;
+                        m_DashOn = true;
+                        m_DashButtonHold = true;
+                        Debug.Log("mouse down");
+                    }
+                }
+            }
+            if (mouse1Up)
+            {
+                    m_DashButtonHold = false;
+                    Debug.Log("mouse up");
+            }
+            if (mouse2)//if m2 pressed
+            {
+                Debug.Log("Right click");
+                if (m_Layer == 0)//NONE
+                {
+
+                }
+                else if (m_Layer == 1)//TELEPORT
+                {
+                    if (m_TeleportOn)
+                    {
+                        //turn off
+                        m_TeleportOn = false;
+                        m_TeleportAvail = m_TeleportCD + Time.time;
+                    }
+                    else if (Time.time > m_TeleportAvail)
+                    {
+                        //teleport activate
+                        Vector2 m_MousePosition = new Vector2(Camera.main.ScreenToWorldPoint(Input.mousePosition).x, Camera.main.ScreenToWorldPoint(Input.mousePosition).y);
+                        Vector2 m_Direction = (m_MousePosition - m_Rigidbody2D.position).normalized;
+                        //for now (need to add delays/charging)
+                        m_Rigidbody2D.position = m_Rigidbody2D.position + m_Direction * m_TeleportRange;
+                        m_TeleportAvail = Time.time + m_TeleportCD;
+                    }
                 }
             }
         }
