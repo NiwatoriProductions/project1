@@ -225,7 +225,6 @@
     </ProjectReference>
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="Assets\My Scripts\Abilities.cs" />
     <Compile Include="Assets\My Scripts\Platformer2DUserControl.cs" />
     <Compile Include="Assets\My Scripts\PlatformerCharacter2D.cs" />
   </ItemGroup>
