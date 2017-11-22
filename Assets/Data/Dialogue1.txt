@@ -1,0 +1,6 @@
+Birb;Whoa space. This is cool!;0;R
+Carolyn;You're right it's super cold. Its about -455 degree fahrenheit;0;L
+Birb;Oh that's cold;1;R
+Player;Restart:line,0;Continue:line,4
+Birb;Isn't this too cold to survive?;2;L
+Carolyn;Certainly, but don't worry we will die from lack of pressure first anyway!;2;R
